@@ -4,7 +4,7 @@ Snake Game en Python/Pygame donde la IA juega sola usando modelos locales via Ol
 
 ## Modelos usados
 - **LLaMA 3.1 8B** — genera los niveles con obstáculos
-- **Deepseek-coder-v2:16b - Usada para generar el codigo del juego pero para controlar a la serpiente no servia
+- **Deepseek-coder-v2:16b** - Usada para generar el codigo del juego pero para controlar a la serpiente no servia
 - **Qwen 2.5 7B** — controla la serpiente en modo IA
 
 ## Requisitos
