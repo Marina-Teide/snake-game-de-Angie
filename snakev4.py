@@ -11,7 +11,6 @@ def cargar(path):
     img.set_colorkey((0, 0, 0))
     return img
 
-# ─── MEMORIA PERSISTENTE ─────────────────────────────────────────────────────
 MEMORIA_PATH = "memoria_snake.json"
 
 def cargar_memoria():
@@ -24,7 +23,7 @@ def cargar_memoria():
         "muertes_ia": 0,
         "muertes_manual": 0,
         "dificultad": "facil",
-        "errores_ia": []  # NUEVO: historial de errores
+        "errores_ia": []
     }
 
 def guardar_memoria(mem):
@@ -32,15 +31,13 @@ def guardar_memoria(mem):
         json.dump(mem, f, indent=2)
 
 def registrar_error(mem, serpiente, direccion, causa):
-    """Guarda dónde y cómo murió la IA para que aprenda"""
     error = {
         "cabeza": serpiente[0],
         "direccion": DIR_NAMES.get(direccion, "?"),
-        "causa": causa,  # "borde", "cuerpo", "obstaculo"
+        "causa": causa,
         "longitud": len(serpiente)
     }
     mem["errores_ia"].append(error)
-    # Guardar solo los últimos 10 errores
     mem["errores_ia"] = mem["errores_ia"][-10:]
 
 def actualizar_dificultad(mem):
@@ -53,44 +50,34 @@ def actualizar_dificultad(mem):
     else:
         mem["dificultad"] = "facil"
 
-# ─── MAPA ASCII ───────────────────────────────────────────────────────────────
 def generar_mapa_ascii(serpiente, comida, obstaculos, direccion, ancho=480, alto=400, celda=20):
     DIR_CHAR = {0: ">", 1: "v", 2: "<", 3: "^"}
     cols = ancho // celda
     filas = (alto - 40) // celda
-
     mapa = [["." for _ in range(cols)] for _ in range(filas)]
-
     for ox, oy in obstaculos:
         c, f = ox // celda, (oy - 40) // celda
         if 0 <= c < cols and 0 <= f < filas:
             mapa[f][c] = "X"
-
     fc, ff = comida[0] // celda, (comida[1] - 40) // celda
     if 0 <= fc < cols and 0 <= ff < filas:
         mapa[ff][fc] = "F"
-
     for i, (sx, sy) in enumerate(serpiente):
         sc, sf = sx // celda, (sy - 40) // celda
         if 0 <= sc < cols and 0 <= sf < filas:
             mapa[sf][sc] = DIR_CHAR[direccion] if i == 0 else "S"
-
     borde = "#" * (cols + 2)
     filas_str = [borde]
     for fila in mapa:
         filas_str.append("#" + "".join(fila) + "#")
     filas_str.append(borde)
-
     return "\n".join(filas_str)
 
-# ─── OLLAMA ───────────────────────────────────────────────────────────────────
 def llamar_ollama(modelo, prompt, callback):
     def _llamar():
         try:
             r = requests.post("http://localhost:11434/api/generate", json={
-                "model": modelo,
-                "prompt": prompt,
-                "stream": False
+                "model": modelo, "prompt": prompt, "stream": False
             }, timeout=15)
             callback(r.json()["response"])
         except:
@@ -100,9 +87,7 @@ def llamar_ollama(modelo, prompt, callback):
 def llamar_ollama_sync(modelo, prompt):
     try:
         r = requests.post("http://localhost:11434/api/generate", json={
-            "model": modelo,
-            "prompt": prompt,
-            "stream": False
+            "model": modelo, "prompt": prompt, "stream": False
         }, timeout=15)
         return r.json()["response"]
     except:
@@ -138,7 +123,6 @@ def parsear_obstaculos(texto):
     except:
         return []
 
-# ─── PYGAME ───────────────────────────────────────────────────────────────────
 pygame.init()
 pygame.mixer.init()
 ancho, alto = 480, 400
@@ -170,7 +154,6 @@ def estado_inicial():
 
 estado = estado_inicial()
 
-# Carga de imágenes
 cabeza_img = {
     0: cargar("assets/head_right.png"),
     1: cargar("assets/head_down.png"),
@@ -198,11 +181,9 @@ comida_img  = pygame.transform.scale(pygame.image.load("assets/chuleta.png").con
 tronco_img  = pygame.transform.scale(pygame.image.load("assets/tronco.png").convert_alpha(), (40, 40))
 sonido_muerte = pygame.mixer.Sound("assets/gameover.mp3")
 
-# ─── FUNCIONES IA ─────────────────────────────────────────────────────────────
 def pedir_obstaculos(e, memoria):
     dificultad = memoria["dificultad"]
     num_obs = {"facil": 3, "media": 5, "dificil": 7}.get(dificultad, 4)
-
     prompt = f"""Eres el generador de niveles de un Snake Game.
 Tablero: 480x400. Zona de juego: y entre 40 y 400.
 Serpiente inicial: {e["serpiente"]}.
@@ -221,31 +202,23 @@ Responde SOLO con un array JSON. Ejemplo: [[100, 120], [300, 200], [200, 340]]""
     llamar_ollama("llama3.1:8b", prompt, callback)
 
 def construir_prompt_ia(e, memoria):
-    """Prompt enriquecido con historial de errores anteriores"""
-    mapa = generar_mapa_ascii(
-        e["serpiente"], e["comida"], e["obstaculos"], e["direccion"]
-    )
+    mapa = generar_mapa_ascii(e["serpiente"], e["comida"], e["obstaculos"], e["direccion"])
     dir_actual = DIR_NAMES[e["direccion"]]
-
-    # Construir resumen de errores pasados
     errores = memoria.get("errores_ia", [])
     if errores:
-        resumen_errores = "\n".join([
-            f"- Morí en {err['cabeza']} yendo {err['direccion']} por {err['causa']}"
-            for err in errores[-5:]  # últimos 5 errores
+        resumen = "\n".join([
+            f"- Mori en {err['cabeza']} yendo {err['direccion']} por {err['causa']}"
+            for err in errores[-5:]
         ])
-        contexto_errores = f"""
-Mis ultimos errores (EVITA repetirlos):
-{resumen_errores}"""
+        contexto = f"\nMis ultimos errores (EVITA repetirlos):\n{resumen}"
     else:
-        contexto_errores = ""
-
+        contexto = ""
     return f"""Eres el cerebro de una serpiente en Snake.
 Tablero (# bordes, S cuerpo, cabeza con direccion {dir_actual}, F comida, X obstaculos):
 
 {mapa}
 
-Direccion actual: {dir_actual}. NO puedes ir en direccion contraria.{contexto_errores}
+Direccion actual: {dir_actual}. NO puedes ir en direccion contraria.{contexto}
 
 Elige la mejor direccion para llegar a F evitando # X y S.
 Responde SOLO con una palabra: UP DOWN LEFT RIGHT"""
@@ -253,13 +226,11 @@ Responde SOLO con una palabra: UP DOWN LEFT RIGHT"""
 def direccion_fallback(serpiente, comida, obstaculos, direccion_actual):
     cx, cy = serpiente[0]
     fx, fy = comida
-
     candidatas = []
     if fx > cx: candidatas.append(0)
     if fx < cx: candidatas.append(2)
     if fy > cy: candidatas.append(1)
     if fy < cy: candidatas.append(3)
-
     for d in candidatas:
         if d == OPUESTO[direccion_actual]:
             continue
@@ -267,10 +238,8 @@ def direccion_fallback(serpiente, comida, obstaculos, direccion_actual):
         elif d == 1: nueva = (cx, cy+20)
         elif d == 2: nueva = (cx-20, cy)
         else: nueva = (cx, cy-20)
-        if (nueva not in serpiente and
-            nueva not in obstaculos and
-            0 <= nueva[0] < 480 and
-            40 <= nueva[1] < 400):
+        if (nueva not in serpiente and nueva not in obstaculos and
+                0 <= nueva[0] < 480 and 40 <= nueva[1] < 400):
             return d
     return direccion_actual
 
@@ -286,7 +255,6 @@ def pedir_primera_direccion(e, memoria):
     msg = pygame.font.SysFont(None, 36).render("Qwen calculando primer movimiento...", True, (0, 220, 0))
     ventana.blit(msg, (240 - msg.get_width()//2, 190))
     pygame.display.flip()
-
     resp = llamar_ollama_sync("snakeai", construir_prompt_ia(e, memoria))
     d = parsear_direccion(resp)
     if d and DIR_MAP[d] != OPUESTO[e["direccion"]]:
@@ -298,16 +266,28 @@ def pedir_direccion_ia(e, memoria):
     if e["ia_pensando"]:
         return
     e["ia_pensando"] = True
-
     def callback(resp):
         d = parsear_direccion(resp)
         if d and DIR_MAP[d] != OPUESTO[e["direccion"]]:
             e["ia_direccion"] = DIR_MAP[d]
         e["ia_pensando"] = False
-
     llamar_ollama("snakeai", construir_prompt_ia(e, memoria), callback)
 
-# ─── PANTALLAS ────────────────────────────────────────────────────────────────
+def mostrar_game_over(puntuacion, memoria):
+    """Muestra game over y espera — funciona para ambos modos"""
+    sonido_muerte.play()
+    fuente = pygame.font.SysFont(None, 72)
+    texto = fuente.render("GAME OVER", True, (255, 0, 0))
+    sub = pygame.font.SysFont(None, 28).render(
+        f"Puntuacion: {puntuacion}  |  Record: {memoria['mejor_puntuacion']}",
+        True, (255, 255, 255)
+    )
+    ventana.fill((0, 0, 0))
+    ventana.blit(texto, (240 - texto.get_width()//2, 160))
+    ventana.blit(sub, (240 - sub.get_width()//2, 250))
+    pygame.display.flip()
+    pygame.time.delay(2500)
+
 def pantalla_inicio(memoria):
     pygame.mixer.music.load("assets/start.mp3")
     pygame.mixer.music.play(-1)
@@ -315,20 +295,28 @@ def pantalla_inicio(memoria):
     while True:
         ventana.fill((0, 50, 0))
 
+        # Título
         titulo = pygame.font.SysFont(None, 64).render("SNAKE GAME", True, (0, 255, 0))
-        ventana.blit(titulo, (240 - titulo.get_width()//2, 55))
+        ventana.blit(titulo, (240 - titulo.get_width()//2, 40))
 
         sub = pygame.font.SysFont(None, 24).render("con Inteligencia Artificial Local", True, (150, 220, 150))
-        ventana.blit(sub, (240 - sub.get_width()//2, 118))
+        ventana.blit(sub, (240 - sub.get_width()//2, 105))
 
-        stats = pygame.font.SysFont(None, 22).render(
-            f"Record: {memoria['mejor_puntuacion']}   Partidas: {memoria['partidas']}   Dificultad: {memoria['dificultad'].upper()}   Errores IA memorizados: {errores_count}",
+        # Stats en dos líneas para que quepan
+        linea1 = pygame.font.SysFont(None, 22).render(
+            f"Record: {memoria['mejor_puntuacion']}   Partidas: {memoria['partidas']}   Dificultad: {memoria['dificultad'].upper()}",
             True, (100, 200, 100)
         )
-        ventana.blit(stats, (240 - stats.get_width()//2, 158))
+        linea2 = pygame.font.SysFont(None, 22).render(
+            f"Errores IA memorizados: {errores_count}",
+            True, (100, 200, 100)
+        )
+        ventana.blit(linea1, (240 - linea1.get_width()//2, 138))
+        ventana.blit(linea2, (240 - linea2.get_width()//2, 158))
 
-        btn_manual = pygame.Rect(60, 210, 160, 50)
-        btn_ia     = pygame.Rect(260, 210, 160, 50)
+        # Botones
+        btn_manual = pygame.Rect(60, 195, 160, 50)
+        btn_ia     = pygame.Rect(260, 195, 160, 50)
         pygame.draw.rect(ventana, (0, 150, 0), btn_manual, border_radius=8)
         pygame.draw.rect(ventana, (0, 80, 180), btn_ia, border_radius=8)
 
@@ -337,22 +325,24 @@ def pantalla_inicio(memoria):
         ventana.blit(t1, (btn_manual.x + btn_manual.w//2 - t1.get_width()//2, btn_manual.y + 13))
         ventana.blit(t2, (btn_ia.x + btn_ia.w//2 - t2.get_width()//2, btn_ia.y + 13))
 
-        # Mostrar últimos errores de la IA
+        # Últimos errores
         if errores_count > 0:
-            err_titulo = pygame.font.SysFont(None, 20).render("Ultimos errores memorizados por Qwen:", True, (180, 180, 100))
-            ventana.blit(err_titulo, (240 - err_titulo.get_width()//2, 278))
+            err_titulo = pygame.font.SysFont(None, 20).render(
+                "Ultimos errores de Qwen:", True, (180, 180, 100)
+            )
+            ventana.blit(err_titulo, (240 - err_titulo.get_width()//2, 260))
             for i, err in enumerate(memoria["errores_ia"][-3:]):
                 txt = pygame.font.SysFont(None, 18).render(
-                    f"• Posicion {err['cabeza']} yendo {err['direccion']} — causa: {err['causa']}",
+                    f"• {err['cabeza']} → {err['direccion']} — {err['causa']}",
                     True, (150, 150, 100)
                 )
-                ventana.blit(txt, (240 - txt.get_width()//2, 298 + i * 18))
+                ventana.blit(txt, (240 - txt.get_width()//2, 280 + i * 18))
 
         nota = pygame.font.SysFont(None, 18).render(
-            "LLaMA genera niveles  |  Qwen aprende de sus errores anteriores",
+            "LLaMA genera niveles  |  Qwen aprende de sus errores",
             True, (80, 160, 80)
         )
-        ventana.blit(nota, (240 - nota.get_width()//2, 368))
+        ventana.blit(nota, (240 - nota.get_width()//2, 372))
 
         pygame.display.flip()
 
@@ -413,7 +403,7 @@ def dibujar_juego(e, memoria):
 
     if e["modo"] == "ia":
         errores_count = len(memoria.get("errores_ia", []))
-        label = f"Fallback ({errores_count} err.)" if e.get("usando_fallback") else f"Qwen ({errores_count} err. aprendidos)"
+        label = f"Fallback" if e.get("usando_fallback") else f"Qwen ({errores_count} err.)"
         color = (255, 200, 0) if e.get("usando_fallback") else (100, 200, 255)
         tag = pygame.font.SysFont(None, 20).render(label, True, color)
         ventana.blit(tag, (ancho - tag.get_width() - 5, 13))
@@ -497,11 +487,12 @@ while True:
     if (cab[0] < 0 or cab[0] >= 480 or cab[1] < 40 or cab[1] >= 400 or
             cab in estado["serpiente"][1:] or cab in estado["obstaculos"]):
 
-        # Registrar error si estaba en modo IA
+        # Registrar error solo si IA jugaba sin fallback
         if estado["modo"] == "ia" and not estado["usando_fallback"]:
             causa = detectar_causa_muerte(cab, estado["serpiente"], estado["obstaculos"])
             registrar_error(memoria, estado["serpiente"], estado["direccion"], causa)
 
+        # Actualizar memoria
         memoria["partidas"] += 1
         if estado["puntuacion"] > memoria["mejor_puntuacion"]:
             memoria["mejor_puntuacion"] = estado["puntuacion"]
@@ -512,19 +503,10 @@ while True:
         actualizar_dificultad(memoria)
         guardar_memoria(memoria)
 
-        sonido_muerte.play()
-        fuente = pygame.font.SysFont(None, 72)
-        texto = fuente.render("GAME OVER", True, (255, 0, 0))
-        sub = pygame.font.SysFont(None, 28).render(
-            f"Puntuacion: {estado['puntuacion']}  |  Errores IA memorizados: {len(memoria['errores_ia'])}",
-            True, (255, 255, 255)
-        )
-        ventana.fill((34, 85, 34))
-        ventana.blit(texto, (240 - texto.get_width()//2, 160))
-        ventana.blit(sub, (240 - sub.get_width()//2, 245))
-        pygame.display.flip()
-        pygame.time.delay(2500)
+        # Mostrar game over
+        mostrar_game_over(estado["puntuacion"], memoria)
 
+        # Reiniciar
         modo = pantalla_inicio(memoria)
         estado = estado_inicial()
         estado["modo"] = modo
